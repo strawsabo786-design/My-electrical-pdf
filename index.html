@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My PDF Library</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:#f4f7fb;color:#172033}
+header{background:#182848;color:#fff;padding:24px 18px;text-align:center}
+header h1{margin:0 0 7px;font-size:28px} header p{margin:0;opacity:.85}
+.container{max-width:1000px;margin:25px auto;padding:0 16px}
+.upload{background:#fff;border:2px dashed #7182a5;border-radius:16px;padding:30px;text-align:center;cursor:pointer;transition:.2s}
+.upload:hover,.upload.drag{background:#eef4ff;border-color:#315dcc}
+.upload .icon{font-size:42px}.upload h2{margin:10px 0 6px}.upload p{color:#667085}
+button{border:0;border-radius:9px;padding:10px 15px;cursor:pointer;font-weight:600}
+.primary{background:#315dcc;color:white}.danger{background:#ffe9e9;color:#b42318}
+input[type=file]{display:none}
+.toolbar{display:flex;gap:10px;justify-content:space-between;align-items:center;margin:22px 0 12px}
+#search{width:100%;max-width:350px;padding:11px 13px;border:1px solid #d0d5dd;border-radius:9px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:15px}
+.card{background:#fff;border-radius:14px;padding:16px;box-shadow:0 3px 12px rgba(0,0,0,.06)}
+.card h3{font-size:16px;margin:0 0 8px;word-break:break-word}.meta{font-size:13px;color:#667085;margin-bottom:14px}
+.actions{display:flex;gap:8px}.actions button{flex:1}
+.empty{text-align:center;color:#667085;padding:35px;background:#fff;border-radius:14px}
+.note{font-size:12px;color:#667085;text-align:center;margin-top:18px}
+</style>
+</head>
+<body>
+<header><h1>📚 My PDF Library</h1><p>Upload, save and download your study PDFs anytime on this device.</p></header>
+<div class="container">
+  <label class="upload" id="dropZone" for="pdfInput">
+    <div class="icon">📄</div><h2>Upload PDF</h2>
+    <p>Click here or drag & drop your PDF</p>
+    <button type="button" class="primary" onclick="document.getElementById('pdfInput').click()">Choose PDF</button>
+    <input id="pdfInput" type="file" accept="application/pdf">
+  </label>
+
+  <div class="toolbar">
+    <strong id="count">0 PDFs</strong>
+    <input id="search" placeholder="Search PDF name...">
+  </div>
+  <div id="library" class="grid"></div>
+  <div class="note">Your PDFs are stored locally in this browser using IndexedDB. Clearing browser/site data can remove them.</div>
+</div>
+
+<script>
+const DB_NAME='pdfLibraryDB', STORE='pdfs';
+let db;
+
+function openDB(){
+ return new Promise((resolve,reject)=>{
+  const req=indexedDB.open(DB_NAME,1);
+  req.onupgradeneeded=()=>req.result.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
+  req.onsuccess=()=>{db=req.result;resolve(db)};
+  req.onerror=()=>reject(req.error);
+ });
+}
+function addPDF(file){
+ if(file.type!=='application/pdf'){alert('Please select a PDF file.');return;}
+ const tx=db.transaction(STORE,'readwrite'), store=tx.objectStore(STORE);
+ store.add({name:file.name,size:file.size,date:new Date().toISOString(),blob:file});
+ tx.oncomplete=render;
+}
+function getAll(){
+ return new Promise((resolve,reject)=>{
+  const req=db.transaction(STORE,'readonly').objectStore(STORE).getAll();
+  req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error);
+ });
+}
+function removePDF(id){
+ const tx=db.transaction(STORE,'readwrite'); tx.objectStore(STORE).delete(Number(id)); tx.oncomplete=render;
+}
+async function downloadPDF(id){
+ const req=db.transaction(STORE,'readonly').objectStore(STORE).get(Number(id));
+ req.onsuccess=()=>{
+  const item=req.result, url=URL.createObjectURL(item.blob);
+  const a=document.createElement('a');a.href=url;a.download=item.name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+ };
+}
+async function readPDF(id){
+ const req=db.transaction(STORE,'readonly').objectStore(STORE).get(Number(id));
+ req.onsuccess=()=>window.open(URL.createObjectURL(req.result.blob),'_blank');
+}
+function fmt(bytes){
+ if(bytes<1024*1024)return (bytes/1024).toFixed(1)+' KB';
+ return (bytes/1024/1024).toFixed(1)+' MB';
+}
+async function render(){
+ const q=document.getElementById('search').value.toLowerCase();
+ const items=(await getAll()).filter(x=>x.name.toLowerCase().includes(q)).sort((a,b)=>new Date(b.date)-new Date(a.date));
+ document.getElementById('count').textContent=items.length+' PDF'+(items.length===1?'':'s');
+ const box=document.getElementById('library');
+ if(!items.length){box.innerHTML='<div class="empty">No PDFs found. Upload your first PDF above.</div>';return;}
+ box.innerHTML=items.map(x=>`<div class="card">
+   <h3>📕 ${escapeHTML(x.name)}</h3>
+   <div class="meta">${fmt(x.size)} • ${new Date(x.date).toLocaleString()}</div>
+   <div class="actions">
+    <button class="primary" onclick="readPDF(${x.id})">Read</button>
+    <button class="primary" onclick="downloadPDF(${x.id})">Download</button>
+    <button class="danger" onclick="removePDF(${x.id})">Delete</button>
+   </div>
+ </div>`).join('');
+}
+function escapeHTML(s){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+
+document.getElementById('pdfInput').addEventListener('change',e=>[...e.target.files].forEach(addPDF));
+document.getElementById('search').addEventListener('input',render);
+const dz=document.getElementById('dropZone');
+['dragenter','dragover'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.add('drag')}));
+['dragleave','drop'].forEach(e=>dz.addEventListener(e,ev=>{ev.preventDefault();dz.classList.remove('drag')}));
+dz.addEventListener('drop',ev=>[...ev.dataTransfer.files].forEach(addPDF));
+openDB().then(render);
+</script>
+</body>
+</html>
